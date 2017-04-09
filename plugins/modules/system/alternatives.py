@@ -87,33 +87,14 @@ import subprocess
 from ansible.module_utils.basic import AnsibleModule
 
 
-def main():
-
-    module = AnsibleModule(
-        argument_spec=dict(
-            name=dict(type='str', required=True),
-            path=dict(type='path', required=True),
-            link=dict(type='path'),
-            priority=dict(type='int', default=50),
-            slaves=dict(type='list', elements='dict'),
-        ),
-        supports_check_mode=True,
-    )
-
-    params = module.params
-    name = params['name']
-    path = params['path']
-    link = params['link']
-    priority = params['priority']
-
-    UPDATE_ALTERNATIVES = module.get_bin_path('update-alternatives', True)
+def get_current(module, bin, name, link):
 
     current_path = None
     all_alternatives = []
 
     # Run `update-alternatives --display <name>` to find existing alternatives
     (rc, display_output, dummy) = module.run_command(
-        ['env', 'LC_ALL=C', UPDATE_ALTERNATIVES, '--display', name]
+        ['env', 'LC_ALL=C', bin, '--display', name]
     )
 
     if rc == 0:
@@ -136,7 +117,7 @@ def main():
             # This is only compatible on Debian-based systems, as the other
             # alternatives don't have --query available
             rc, query_output, dummy = module.run_command(
-                ['env', 'LC_ALL=C', UPDATE_ALTERNATIVES, '--query', name]
+                ['env', 'LC_ALL=C', bin, '--query', name]
             )
             if rc == 0:
                 for line in query_output.splitlines():
@@ -144,6 +125,11 @@ def main():
                         link = line.split()[1]
                         break
 
+    return current_path, all_alternatives, link
+
+
+def set_alternative(module, bin, name, path, link, priority, slaves,
+                    current_path, all_alternatives):
     if current_path != path:
         if module.check_mode:
             module.exit_json(changed=True, current_path=current_path)
@@ -153,11 +139,12 @@ def main():
                 if not os.path.exists(path):
                     module.fail_json(msg="Specified path %s does not exist" % path)
                 if not link:
-                    module.fail_json(msg="Needed to install the alternative, but unable to do so as we are missing the link")
+                    module.fail_json(msg="Needed to install the alternative, "
+                                     "but unable to do so as we are missing the link")
 
-                cmd = [UPDATE_ALTERNATIVES, '--install', link, name, path, str(priority)]
-                if params['slaves']:
-                    slaves = map(lambda slave: ['--slave', slave['link'], slave['name'], slave['path']], params['slaves'])
+                cmd = [bin, '--install', link, name, path, str(priority)]
+                if slaves:
+                    slaves = map(lambda slave: ['--slave', slave['link'], slave['name'], slave['path']], slaves)
                     cmd += [item for sublist in slaves for item in sublist]
 
                 module.run_command(
@@ -167,7 +154,7 @@ def main():
 
             # select the requested path
             module.run_command(
-                [UPDATE_ALTERNATIVES, '--set', name, path],
+                [bin, '--set', name, path],
                 check_rc=True
             )
 
@@ -176,6 +163,34 @@ def main():
             module.fail_json(msg=str(dir(cpe)))
     else:
         module.exit_json(changed=False)
+
+
+def main():
+
+    module = AnsibleModule(
+        argument_spec=dict(
+            name=dict(type='str', required=True),
+            path=dict(type='path', required=True),
+            link=dict(type='path'),
+            priority=dict(type='int', default=50),
+            slaves=dict(type='list', elements='dict'),
+        ),
+        supports_check_mode=True,
+    )
+
+    params = module.params
+    name = params['name']
+    path = params['path']
+    link = params['link']
+    priority = params['priority']
+    slaves = params['slaves']
+
+    UPDATE_ALTERNATIVES = module.get_bin_path('update-alternatives', True)
+    (current_path, all_alternatives, link) = get_current(
+        module, UPDATE_ALTERNATIVES, name, link)
+
+    set_alternative(module, UPDATE_ALTERNATIVES, name, path, link, priority, slaves,
+                    current_path, all_alternatives)
 
 
 if __name__ == '__main__':
