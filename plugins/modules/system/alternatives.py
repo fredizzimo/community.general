@@ -41,6 +41,13 @@ options:
       - The priority of the alternative.
     type: int
     default: 50
+  state:
+    description:
+      - The state of the identified alternative.
+    type: str
+    required: false
+    default: present
+    choices: [ present, absent ]
 requirements: [ update-alternatives ]
 '''
 
@@ -61,6 +68,12 @@ EXAMPLES = r'''
     name: java
     path: /usr/lib/jvm/java-7-openjdk-i386/jre/bin/java
     priority: -10
+
+- name: remove a java version from the alternatives
+  alternatives:
+    name: java
+    path: /usr/lib/jvm/java-7-openjdk-amd64/jre/bin/java
+    state: absent
 '''
 
 import os
@@ -153,6 +166,18 @@ def set_alternative(module, cmd, name, path, link, priority,
         module.exit_json(changed=False)
 
 
+def remove_alternative(module, cmd, name, path, all_alternatives):
+    """Remove the requested path if necessary"""
+    if path in all_alternatives:
+        try:
+            module.run_command([cmd, '--remove', name, path], check_rc=True)
+            module.exit_json(changed=True)
+        except subprocess.CalledProcessError as cpe:
+            module.fail_json(msg=str(dir(cpe)))
+    else:
+        module.exit_json(changed=False)
+
+
 def main():
     """Main module entrypoint"""
     module = AnsibleModule(
@@ -161,6 +186,7 @@ def main():
             path=dict(type='path', required=True),
             link=dict(type='path'),
             priority=dict(type='int', default=50),
+            state=dict(choices=['present', 'absent'], default='present'),
         ),
         supports_check_mode=True,
     )
@@ -170,13 +196,17 @@ def main():
     path = params['path']
     link = params['link']
     priority = params['priority']
+    state = params['state']
 
     UPDATE_ALTERNATIVES = module.get_bin_path('update-alternatives', True)
     (current_path, all_alternatives, link) = get_current(
         module, UPDATE_ALTERNATIVES, name, link)
 
-    set_alternative(module, UPDATE_ALTERNATIVES, name, path, link, priority,
-                    current_path, all_alternatives)
+    if state == 'present':
+        set_alternative(module, UPDATE_ALTERNATIVES, name, path, link, priority,
+                        current_path, all_alternatives)
+    elif state == 'absent':
+        remove_alternative(module, UPDATE_ALTERNATIVES, name, path, all_alternatives)
 
 
 if __name__ == '__main__':
