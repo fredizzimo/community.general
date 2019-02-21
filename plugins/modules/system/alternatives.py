@@ -41,6 +41,13 @@ options:
       - The priority of the alternative.
     type: int
     default: 50
+  slaves:
+    description:
+      - A list of slaves
+      - Each slave needs a name, a link and a path parameter
+    type: list
+    elements: dict
+
 requirements: [ update-alternatives ]
 '''
 
@@ -61,6 +68,16 @@ EXAMPLES = r'''
     name: java
     path: /usr/lib/jvm/java-7-openjdk-i386/jre/bin/java
     priority: -10
+
+- name: keytool is a slave of java
+  community.general.alternatives:
+    name: java
+    link: /usr/bin/java
+    path: /usr/lib/jvm/java-7-openjdk-amd64/jre/bin/java
+    slaves:
+      - name: keytool
+        link: /usr/bin/keytool
+        path: /usr/lib/jvm/java-7-openjdk-amd64/jre/bin/keytool
 '''
 
 import os
@@ -78,6 +95,7 @@ def main():
             path=dict(type='path', required=True),
             link=dict(type='path'),
             priority=dict(type='int', default=50),
+            slaves=dict(type='list', elements='dict'),
         ),
         supports_check_mode=True,
     )
@@ -137,8 +155,13 @@ def main():
                 if not link:
                     module.fail_json(msg="Needed to install the alternative, but unable to do so as we are missing the link")
 
+                cmd = [UPDATE_ALTERNATIVES, '--install', link, name, path, str(priority)]
+                if params['slaves']:
+                    slaves = map(lambda slave: ['--slave', slave['link'], slave['name'], slave['path']], params['slaves'])
+                    cmd += [item for sublist in slaves for item in sublist]
+
                 module.run_command(
-                    [UPDATE_ALTERNATIVES, '--install', link, name, path, str(priority)],
+                    cmd,
                     check_rc=True
                 )
 
